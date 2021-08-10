@@ -1,0 +1,14 @@
+﻿@page "/new"
+@using IndriEstimationPoker
+@inject EstimationStateRepo Repo
+@inject NavigationManager Navi
+
+@code {
+    protected override void OnInitialized()
+    {
+        var id = Guid.NewGuid().ToString().Substring( 0, 8 );
+        Repo.Create( id );
+        Navi.NavigateTo( "estimation/" + id );
+        base.OnInitialized();
+    }
+}

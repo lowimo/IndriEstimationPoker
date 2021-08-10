@@ -1,0 +1,217 @@
+﻿@page "/estimation/{id}"
+@using System.Threading
+@using Blazored.LocalStorage
+@using IndriEstimationPoker
+@inject EstimationStateRepo Repo
+@inject NavigationManager Navi
+@inject ILocalStorageService LocalStorage
+@implements IDisposable
+
+<h1>Estimation!</h1>
+
+@if ( state == null )
+{
+    <b>Unkown ID</b>
+}
+else
+{
+    <div class="ui small form">
+        <div class="inline field">
+            <label>My name</label>
+            <input type="text" placeholder="your name" @bind-value="playerName" @onblur="OnNameBlur">
+        </div>
+    </div>
+
+    <h3>Players</h3>
+
+    @if ( state.IsRevealed )
+    {
+        @foreach ( var group in state.Players.Values.GroupBy( x => x.EstimationValue ).OrderByDescending( g => g.Count() ) )
+        {
+            <div class="ui fluid card">
+                <div class="content">
+                    <div class="ui right floated">@group.Count() @(group.Count() > 1 ? "votes" : "vote")</div>
+                    <h1 class="header">@Format( group.Key )</h1>
+                    <p>
+                        @string.Join( ", ", group.OrderBy( x => x.Name ).Select( x => x.Name ) )
+                    </p>
+                </div>
+            </div>
+
+            @*<div class="ui grid">
+                    @foreach ( Player p in group.OrderBy(x => x.Name) )
+                    {
+                        <div class="four wide column">
+                            <div class="ui card">
+                                <div class="content">
+                                    <div class="center aligned description">
+                                        @p.Name
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>*@
+        }
+    }
+    else
+    {
+        <div class="ui grid">
+            @foreach ( Player p in state.Players.Values.OrderBy( x => x.Name ) )
+            {
+                <div class="four wide column">
+                    <div class="ui card">
+                        <div class="content">
+                            <div class="center aligned header">
+                                @if ( state.IsRevealed )
+                                {
+                                    @Format( p.EstimationValue )
+                                }
+                                else if ( p.EstimationValue != null )
+                                {
+                                    <span class="oi oi-check" style="color: green;"></span>
+                                }
+                                else
+                                {
+                                    <span class="oi oi-x" style="color: red;"></span>
+                                }
+                            </div>
+                            <div class="center aligned description">
+                                @p.Name
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    <h3>Vote</h3>
+    <div class="ui equal width grid">
+        @foreach ( var opt in options )
+        {
+            <div class="column">
+                <button class="ui button @(player.EstimationValue == opt ? "primary" : "")" @onclick="() => Select(opt)">@Format( opt )</button>
+            </div>
+        }
+    </div>
+
+    <div class="ui divider"></div>
+    <button class="ui button" @onclick="() => RevealHide()">Reveal / Hide</button>
+    <button class="ui button" @onclick="() => NextStory()">Next Story</button>
+
+}
+
+
+@code {
+    private int[] options = new int[] { 0, 1, 2, 3, 5, 8, 13, 21, 99 };
+
+    [Parameter]
+    public string Id { get; set; }
+
+    private EstimationState state;
+    private Player player;
+    private long stateVersion;
+    private Timer timer;
+    private string playerName;
+
+    protected override void OnInitialized()
+    {
+        state = Repo.GetOrDefault( Id );
+
+        if ( state == null )
+            return;
+
+        var playerId = Guid.NewGuid().ToString();
+        playerName = playerId.Substring( 0, 8 );
+
+        player = state.CreatePlayer( playerId, playerName );
+
+        stateVersion = state.Version;
+        timer = new Timer( Tick, null, 1000, 1000 );
+        base.OnInitialized();
+    }
+
+    public void Dispose()
+    {
+        timer?.Dispose();
+
+        if ( state != null && player != null )
+        {
+            state?.RemovePlayer( player );
+        }
+    }
+
+    private void Tick( object x )
+    {
+        if ( stateVersion != state.Version )
+        {
+            stateVersion = state.Version;
+            InvokeAsync( () => StateHasChanged() );
+        }
+    }
+
+    private void OnNameBlur()
+    {
+        if ( state == null || player == null )
+            return;
+
+        if ( playerName == null || playerName.Length < 2 )
+            playerName = Guid.NewGuid().ToString().Substring( 0, 8 );
+
+        if ( playerName.Length > 16 )
+            playerName = playerName.Substring( 0, 16 );
+
+        state.Mutate( s => player.Name = playerName );
+    }
+
+    private void Select( int? opt )
+    {
+        if ( state == null || player == null )
+            return;
+
+        if ( player.EstimationValue == opt )
+            opt = null;
+
+        state.Mutate( s => player.EstimationValue = opt );
+        Tick( null );
+    }
+
+    private void RevealHide()
+    {
+        if ( state == null || player == null )
+            return;
+
+        state.Mutate( s => s.IsRevealed = !s.IsRevealed );
+        Tick( null );
+    }
+
+    private void NextStory()
+    {
+        if ( state == null || player == null )
+            return;
+
+        state.Mutate( s =>
+        {
+            s.IsRevealed = false;
+            foreach ( (string id, Player p) in s.Players )
+            {
+                p.EstimationValue = null;
+            }
+        } );
+        Tick( null );
+    }
+
+    private string Format( int? x )
+    {
+        switch ( x )
+        {
+            case null:
+                return "--";
+            case 99:
+                return "?";
+            default:
+                return x.ToString();
+        }
+    }
+}
